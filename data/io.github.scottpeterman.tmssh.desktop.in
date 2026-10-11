@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=tmssh
+GenericName=SSH Session Manager
+Comment=Tiny managed SSH and telnet sessions on the gtkpyte terminal
+Exec=@bindir@/tmssh
+Icon=utilities-terminal
+Terminal=false
+Categories=Network;RemoteAccess;GTK;
+StartupWMClass=io.github.scottpeterman.tmssh
+StartupNotify=true

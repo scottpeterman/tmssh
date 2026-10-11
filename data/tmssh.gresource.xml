@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- data/tmssh.gresource.xml -- the bundled theme pack, compiled into the binary.
+     Add a line here when a file is added to data/themes/. -->
+<gresources>
+  <gresource prefix="/io/github/scottpeterman/tmssh">
+    <file>themes/1-2-3.yaml</file>
+    <file>themes/amiga.yaml</file>
+    <file>themes/borland.yaml</file>
+    <file>themes/borland2.yaml</file>
+    <file>themes/catppuccin-latte.yaml</file>
+    <file>themes/catppuccin-mocha.yaml</file>
+    <file>themes/corporate-classic.yaml</file>
+    <file>themes/corporate-dark.yaml</file>
+    <file>themes/crt-amber.yaml</file>
+    <file>themes/crt-green.yaml</file>
+    <file>themes/cyber-blue.yaml</file>
+    <file>themes/cyber_custom.yaml</file>
+    <file>themes/cyberish.yaml</file>
+    <file>themes/cyberpunk.yaml</file>
+    <file>themes/darcula.yaml</file>
+    <file>themes/doom.yaml</file>
+    <file>themes/gruvbox-dark.yaml</file>
+    <file>themes/gruvbox-hybrid.yaml</file>
+    <file>themes/gruvbox-light.yaml</file>
+    <file>themes/ice.yaml</file>
+    <file>themes/llforest.yaml</file>
+    <file>themes/neon_city.yaml</file>
+    <file>themes/nord.yaml</file>
+    <file>themes/norton.yaml</file>
+    <file>themes/nostro.yaml</file>
+    <file>themes/pctools.yaml</file>
+    <file>themes/solarized-dark.yaml</file>
+    <file>themes/solarized-hybrid.yaml</file>
+    <file>themes/solarized-light.yaml</file>
+    <file>themes/vintage.yaml</file>
+  </gresource>
+</gresources>
