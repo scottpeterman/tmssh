@@ -105,9 +105,10 @@ struct Session {
     // user@host:port, with the port left off when it is the default.
     std::string target() const;
 
-    // Identity for import de-duplication: transport, host, port. A session
-    // renamed in the tree is still the same device. Empty when there is no
-    // host, and an empty key matches nothing.
+    // Identity for import de-duplication: transport, ssh username, host,
+    // port. A session renamed in the tree is still the same login; two
+    // accounts on one device are two sessions. Empty when there is no host,
+    // and an empty key matches nothing.
     std::string key() const;
 
     bool crlf() const { return !telnet_crlf.has_value() || *telnet_crlf; }
@@ -188,6 +189,14 @@ std::string emit_tree(const Tree &tree);
 // the target, so the file on disk is always either the old tree or the new
 // one. Creates the directory if needed; the file is mode 0600.
 [[nodiscard]] std::string save_file(const std::string &path, const Tree &tree);
+
+// The same temp-file-and-rename write, for text that is already rendered.
+[[nodiscard]] std::string write_text_atomic(const std::string &path, const std::string &text);
+
+// A first session file for a new install: one folder, "Local", holding an ssh
+// session to localhost as the given user (left out when empty), with a
+// comment block naming every key a session can carry.
+std::string seed_sessions_yaml(const std::string &username);
 
 // $XDG_CONFIG_HOME/tmssh/sessions.yaml, else ~/.config/tmssh/sessions.yaml.
 std::string default_sessions_path();

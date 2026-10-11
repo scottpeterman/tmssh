@@ -25,7 +25,7 @@ PREFIX="$HOME/.local"
 RUN=0
 RUN_ARGS=()
 
-APT_PACKAGES=(build-essential git pkg-config meson ninja-build libyaml-cpp-dev libgtk-4-dev)
+APT_PACKAGES=(build-essential git pkg-config meson ninja-build libyaml-cpp-dev libgtk-4-dev librsvg2-common openssh-client)
 
 usage() {
     sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'

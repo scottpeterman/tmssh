@@ -21,6 +21,8 @@ subdir('gtkpyte')
 # Session model and theme data: GTK-free, so the tests need no display.
 core_lib = static_library('tmssh_core',
   'src/sessions.cpp',
+  'src/settings.cpp',
+  'src/ssh_command.cpp',
   'src/themes.cpp',
   dependencies : [yaml_dep],
 )
@@ -39,11 +41,22 @@ theme_resources = gnome.compile_resources('tmssh-resources',
   source_dir : 'data',
 )
 
+# Our own sources are held to the GTK 4.8 API (Debian 12, Crostini): using
+# anything newer is a compile-time warning, not a surprise on the Chromebook.
+gtk_floor_args = [
+  '-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_8',
+  '-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_8',
+  '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_74',
+  '-DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_74',
+]
+
 executable('tmssh',
   'src/main.cpp',
+  'src/app_window.cpp',
   'src/theme_apply.cpp',
   theme_resources,
   dependencies : [core_dep, gtkpyte_dep],
+  cpp_args : gtk_floor_args,
   install : true,
 )
 
@@ -52,6 +65,7 @@ if get_option('tests')
   tmssh_tests = executable('tmssh_tests',
     'tests/main.cpp',
     'tests/test_sessions.cpp',
+    'tests/test_ssh_command.cpp',
     'tests/test_themes.cpp',
     dependencies : [core_dep, doctest_dep],
     cpp_args : ['-DTMSSH_THEMES_DIR="' + meson.project_source_root() / 'data' / 'themes' + '"'],

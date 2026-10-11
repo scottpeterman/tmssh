@@ -117,16 +117,22 @@ TEST_CASE("an unnamed session takes its target as its name") {
     CHECK(s.normalized().name == "u@r1");
 }
 
-TEST_CASE("key is transport, lowercased host and effective port") {
+TEST_CASE("key is transport, ssh user, lowercased host and effective port") {
     Session a = ssh("x", "R1.Lab");
     Session b = ssh("y", "r1.lab");
     b.port = 22;
-    CHECK(a.key() == "ssh:r1.lab:22");
+    CHECK(a.key() == "ssh:admin@r1.lab:22");
     CHECK(a.key() == b.key());
+
+    Session other_user = ssh("z", "r1.lab", "operator");
+    CHECK(other_user.key() != a.key());
+
+    Session no_user = ssh("n", "r1.lab", "");
+    CHECK(no_user.key() == "ssh:r1.lab:22");
 
     Session t = a;
     t.transport = Transport::Telnet;
-    CHECK(t.key() == "telnet:r1.lab:23");
+    CHECK(t.key() == "telnet:r1.lab:23"); // telnet has no user in the model
 
     Session none;
     CHECK(none.key().empty());
@@ -673,6 +679,14 @@ TEST_CASE("import is safe to re-run") {
     CHECK(dst.session_count() == 2);
 }
 
+TEST_CASE("import keeps two accounts on one device") {
+    Tree dst;
+    Tree src;
+    REQUIRE(src.add("A", ssh("as-admin", "10.0.0.1", "admin")).empty());
+    REQUIRE(src.add("A", ssh("as-oper", "10.0.0.1", "operator")).empty());
+    CHECK(import_tree(dst, src).added == 2);
+}
+
 TEST_CASE("import skips duplicates within the source itself") {
     Tree dst;
     Tree src;
@@ -780,4 +794,41 @@ TEST_CASE("an empty folder in the file is kept and written as []") {
     REQUIRE(r.ok());
     REQUIRE(r.tree.folders.size() == 1);
     CHECK(emit_tree(r.tree).find("sessions: []") != std::string::npos);
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// First-run seed
+// ─────────────────────────────────────────────────────────────────────
+
+TEST_CASE("the seed file parses cleanly to Local/localhost as the user") {
+    auto r = parse_tree(seed_sessions_yaml("speterman"));
+    REQUIRE(r.ok());
+    CHECK(r.warnings.empty());
+    REQUIRE(r.tree.folders.size() == 1);
+    CHECK(r.tree.folders[0].name == "Local");
+    REQUIRE(r.tree.folders[0].sessions.size() == 1);
+    const Session &s = r.tree.folders[0].sessions[0];
+    CHECK(s.name == "localhost");
+    CHECK(s.transport == Transport::Ssh);
+    CHECK(s.host == "localhost");
+    CHECK(s.username == "speterman");
+    CHECK(s.target() == "speterman@localhost");
+}
+
+TEST_CASE("the seed keeps odd usernames as strings and omits an empty one") {
+    auto odd = parse_tree(seed_sessions_yaml("true"));
+    REQUIRE(odd.ok());
+    CHECK(odd.tree.folders[0].sessions[0].username == "true");
+
+    auto none = parse_tree(seed_sessions_yaml(""));
+    REQUIRE(none.ok());
+    CHECK(none.tree.folders[0].sessions[0].username.empty());
+}
+
+TEST_CASE("write_text_atomic writes exactly the text") {
+    TempDir d;
+    fs::path p = d.path / "x" / "seed.yaml";
+    const std::string text = seed_sessions_yaml("me");
+    REQUIRE(write_text_atomic(p.string(), text) == "");
+    CHECK(slurp(p) == text);
 }

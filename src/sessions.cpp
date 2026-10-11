@@ -143,7 +143,9 @@ std::string Session::key() const {
     std::string h = lower(trim(host));
     if (h.empty()) return {};
     int p = port == 0 ? default_port(transport) : port;
-    return std::string(to_string(transport)) + ":" + h + ":" + std::to_string(p);
+    std::string u = transport == Transport::Ssh ? trim(username) : std::string{};
+    return std::string(to_string(transport)) + ":" + (u.empty() ? "" : u + "@") + h + ":" +
+           std::to_string(p);
 }
 
 std::vector<FieldError> validate(const Session &in) {
@@ -601,8 +603,10 @@ std::string emit_tree(const Tree &tree) {
 }
 
 std::string save_file(const std::string &path, const Tree &tree) {
-    const std::string text = emit_tree(tree);
+    return write_text_atomic(path, emit_tree(tree));
+}
 
+std::string write_text_atomic(const std::string &path, const std::string &text) {
     fs::path target(path);
     fs::path dir = target.parent_path();
     if (dir.empty()) dir = ".";
@@ -651,6 +655,47 @@ std::string save_file(const std::string &path, const Tree &tree) {
         return "rename to " + path + ": " + std::strerror(saved);
     }
     return {};
+}
+
+std::string seed_sessions_yaml(const std::string &username) {
+    std::string user_line;
+    if (!username.empty()) {
+        Session probe;
+        probe.name = "localhost";
+        probe.host = "localhost";
+        probe.username = username;
+        Tree t;
+        (void)t.add("Local", probe);
+        // Borrow the emitter's quoting so an odd username stays a string.
+        const std::string emitted = emit_tree(t);
+        const auto at = emitted.find("username: ");
+        if (at != std::string::npos) {
+            const auto end = emitted.find('\n', at);
+            user_line = "        " + emitted.substr(at, end - at) + "\n";
+        }
+    }
+    return "# tmssh sessions\n"
+           "#\n"
+           "# Edit this file directly; tmssh reloads it when you save. Folders are one\n"
+           "# level deep. A session needs a name and a host; transport defaults to ssh.\n"
+           "#\n"
+           "# ssh:     port, username, auth_type (agent | password | publickey),\n"
+           "#          key_path, host_key_policy (tofu | strict | insecure),\n"
+           "#          known_hosts, connect_timeout_sec, legacy_algorithms (true),\n"
+           "#          jump: {host, port, username, key_path}\n"
+           "# telnet:  port, telnet_crlf (false to send a bare CR)\n"
+           "# any:     term_type, terminal_theme, font_size, scrollback_lines\n"
+           "#\n"
+           "# Changes made from tmssh itself (delete, import) rewrite this file\n"
+           "# without these comments.\n"
+           "version: 1\n"
+           "folders:\n"
+           "  - folder_name: Local\n"
+           "    sessions:\n"
+           "      - name: localhost\n"
+           "        transport: ssh\n"
+           "        host: localhost\n" +
+           user_line;
 }
 
 std::string default_sessions_path() {
