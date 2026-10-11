@@ -1,0 +1,5 @@
+[wrap-git]
+url = https://github.com/doctest/doctest.git
+revision = v2.5.3
+depth = 1
+patch_directory = doctest
