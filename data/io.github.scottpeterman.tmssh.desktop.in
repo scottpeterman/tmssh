@@ -2,9 +2,9 @@
 Type=Application
 Name=tmssh
 GenericName=SSH Session Manager
-Comment=Tiny managed SSH and telnet sessions on the gtkpyte terminal
+Comment=Tiny managed SSH: a session manager and ssh terminal on gtkpyte
 Exec=@bindir@/tmssh
-Icon=utilities-terminal
+Icon=io.github.scottpeterman.tmssh
 Terminal=false
 Categories=Network;RemoteAccess;GTK;
 StartupWMClass=io.github.scottpeterman.tmssh

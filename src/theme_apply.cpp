@@ -23,12 +23,25 @@ std::optional<AppVariant> parse_app_variant(std::string_view s) {
 
 const char *to_string(AppVariant v) { return v == AppVariant::Light ? "light" : "dark"; }
 
+namespace {
+bool g_pin_adwaita = false;
+} // namespace
+
+void release_appimage_theme_pin() {
+    const char *appdir = g_getenv("APPDIR");
+    const char *theme = g_getenv("GTK_THEME");
+    if (appdir == nullptr || *appdir == '\0' || theme == nullptr) return;
+    g_unsetenv("GTK_THEME");
+    g_pin_adwaita = true;
+}
+
 void set_app_variant(AppVariant v) {
     GtkSettings *settings = gtk_settings_get_default();
     if (settings == nullptr) return;
     // Deprecated from GTK 4.20 in favour of GtkInterfaceColorScheme, which
     // the 4.8 floor (Debian 12, Crostini) does not have.
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    if (g_pin_adwaita) g_object_set(settings, "gtk-theme-name", "Adwaita", nullptr);
     g_object_set(settings, "gtk-application-prefer-dark-theme", v == AppVariant::Dark, nullptr);
     G_GNUC_END_IGNORE_DEPRECATIONS
 }

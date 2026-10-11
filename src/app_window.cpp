@@ -198,11 +198,6 @@ void AppWindow::start_tab(Tab *tab) {
     if (!tab->session) {
         program = tab->program.empty() ? user_shell() : tab->program;
         args = tab->args;
-    } else if (tab->session->transport == Transport::Telnet) {
-        const char *text = "\r\n  telnet sessions arrive in the next tmssh build.\r\n";
-        gtkpyte_terminal_feed(tab->terminal, text, std::strlen(text));
-        set_tab_text(tab->label, tab->title + " (telnet)");
-        return;
     } else {
         Command c = ssh_command(*tab->session, algorithms());
         program = c.program;
@@ -700,14 +695,9 @@ void AppWindow::on_factory_bind(GtkSignalListItemFactory *, GtkListItem *item, g
         const int fi = self->tree_.folder_index(folder ? folder : "");
         const int si = fi >= 0 ? self->tree_.folders[fi].session_index(session) : -1;
         const Session *s = si >= 0 ? &self->tree_.folders[fi].sessions[si] : nullptr;
-        gtk_image_set_from_icon_name(GTK_IMAGE(icon), s && s->transport == Transport::Telnet
-                                                          ? "network-wired-symbolic"
-                                                          : "utilities-terminal-symbolic");
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), "utilities-terminal-symbolic");
         gtk_label_set_text(GTK_LABEL(label), text);
-        if (s) {
-            const std::string tip = std::string(to_string(s->transport)) + "  " + s->target();
-            gtk_widget_set_tooltip_text(expander, tip.c_str());
-        }
+        if (s) gtk_widget_set_tooltip_text(expander, s->target().c_str());
     }
     g_object_unref(obj);
 }
@@ -1048,8 +1038,9 @@ void AppWindow::offer_first_run_import() {
 
     std::string detail = "Found " + std::to_string(lr.tree.session_count()) + " session(s) in " +
                          std::to_string(lr.tree.folders.size()) + " folder(s) in " + source + ".";
-    if (lr.skipped_serial > 0)
-        detail += " " + std::to_string(lr.skipped_serial) + " serial session(s) will be skipped.";
+    if (lr.skipped_unsupported > 0)
+        detail += " " + std::to_string(lr.skipped_unsupported) +
+                  " serial or telnet session(s) will be skipped; tmssh is ssh only.";
     detail += "\n\nPathfinderSSH's file is only read, never changed. "
               "You can import again later from the menu.";
 
@@ -1103,7 +1094,8 @@ void AppWindow::import_from(const std::string &path) {
     if (!r.renamed.empty())
         detail += ", " + std::to_string(r.renamed.size()) + " renamed to avoid a clash";
     if (!r.rejected.empty()) detail += ", " + std::to_string(r.rejected.size()) + " without a host";
-    if (lr.skipped_serial > 0) detail += ", " + std::to_string(lr.skipped_serial) + " serial skipped";
+    if (lr.skipped_unsupported > 0)
+        detail += ", " + std::to_string(lr.skipped_unsupported) + " serial or telnet skipped";
     detail += ".";
     if (!lr.warnings.empty())
         detail += "\n\n" + std::to_string(lr.warnings.size()) +
@@ -1221,8 +1213,8 @@ void AppWindow::act_about(GSimpleAction *, GVariant *, gpointer data) {
     auto *self = static_cast<AppWindow *>(data);
     const char *authors[] = {"Scott Peterman", nullptr};
     gtk_show_about_dialog(GTK_WINDOW(self->window_), "program-name", "tmssh", "comments",
-                          "Tiny Managed SSH: ssh and telnet sessions on the gtkpyte terminal.",
-                          "version", "0.0.1", "website", "https://github.com/scottpeterman/tmssh",
+                          "Tiny Managed SSH: a session manager and ssh terminal on gtkpyte.",
+                          "version", "0.1.0", "website", "https://github.com/scottpeterman/tmssh",
                           "license-type", GTK_LICENSE_GPL_3_0, "authors", authors, "logo-icon-name",
                           "utilities-terminal", nullptr);
 }

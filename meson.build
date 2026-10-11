@@ -1,5 +1,5 @@
 project('tmssh', ['c', 'cpp'],
-  version : '0.0.1',
+  version : '0.1.0',
   license : 'GPL-3.0-or-later',
   meson_version : '>= 1.0.0',
   default_options : [
@@ -83,6 +83,10 @@ configure_file(
   configuration : desktop_conf,
   install : true,
   install_dir : get_option('datadir') / 'applications',
+)
+
+install_data('data/io.github.scottpeterman.tmssh.svg',
+  install_dir : get_option('datadir') / 'icons' / 'hicolor' / 'scalable' / 'apps',
 )
 
 install_data('LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md',

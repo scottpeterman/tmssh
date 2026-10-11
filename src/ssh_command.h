@@ -47,8 +47,7 @@ struct Command {
     std::string display() const;
 };
 
-// The ssh command for a session. Only ssh-transport fields are read; a
-// telnet session is the caller's mistake and gets an ssh command anyway.
+// The ssh command for a session.
 //
 // Mapping:
 //   port / username           -p / -l

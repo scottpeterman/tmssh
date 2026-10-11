@@ -109,6 +109,11 @@ int main(int argc, char *argv[]) {
         return 2;
     }
 
+    tmssh::release_appimage_theme_pin();
+
+    // Found once installed (hicolor) or inside the AppImage; harmless when not.
+    gtk_window_set_default_icon_name("io.github.scottpeterman.tmssh");
+
     GtkApplication *app =
         gtk_application_new("io.github.scottpeterman.tmssh", G_APPLICATION_NON_UNIQUE);
     g_signal_connect(app, "activate", G_CALLBACK(on_activate), nullptr);

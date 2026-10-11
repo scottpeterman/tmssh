@@ -57,21 +57,6 @@ std::string join_host_port(const std::string &host, int port, int def) {
 } // namespace
 
 // ─────────────────────────────────────────────────────────────────────
-// Transport
-// ─────────────────────────────────────────────────────────────────────
-
-const char *to_string(Transport t) { return t == Transport::Telnet ? "telnet" : "ssh"; }
-
-std::optional<Transport> parse_transport(std::string_view s) {
-    std::string v = lower(trim(s));
-    if (v.empty() || v == "ssh") return Transport::Ssh;
-    if (v == "telnet") return Transport::Telnet;
-    return std::nullopt;
-}
-
-int default_port(Transport t) { return t == Transport::Telnet ? 23 : 22; }
-
-// ─────────────────────────────────────────────────────────────────────
 // Session
 // ─────────────────────────────────────────────────────────────────────
 
@@ -81,13 +66,13 @@ bool operator==(const JumpSpec &a, const JumpSpec &b) {
 }
 
 bool operator==(const Session &a, const Session &b) {
-    return std::tie(a.name, a.transport, a.host, a.port, a.username, a.auth_type, a.key_path,
+    return std::tie(a.name, a.host, a.port, a.username, a.auth_type, a.key_path,
                     a.jump, a.legacy_algorithms, a.host_key_policy, a.known_hosts,
-                    a.connect_timeout_sec, a.telnet_crlf, a.term_type, a.terminal_theme,
+                    a.connect_timeout_sec, a.term_type, a.terminal_theme,
                     a.font_size, a.scrollback_lines) ==
-           std::tie(b.name, b.transport, b.host, b.port, b.username, b.auth_type, b.key_path,
+           std::tie(b.name, b.host, b.port, b.username, b.auth_type, b.key_path,
                     b.jump, b.legacy_algorithms, b.host_key_policy, b.known_hosts,
-                    b.connect_timeout_sec, b.telnet_crlf, b.term_type, b.terminal_theme,
+                    b.connect_timeout_sec, b.term_type, b.terminal_theme,
                     b.font_size, b.scrollback_lines);
 }
 
@@ -106,10 +91,8 @@ Session Session::normalized() const {
     n.jump.username = trim(n.jump.username);
     n.jump.key_path = trim(n.jump.key_path);
 
-    if (n.port == 0) n.port = default_port(n.transport);
+    if (n.port == 0) n.port = kSshPort;
 
-    // Filled regardless of transport: the edit dialog holds both groups, and
-    // a hidden ssh group must not show blanks when the selector flips to it.
     if (n.auth_type.empty()) n.auth_type = kAuthAgent;
     if (n.host_key_policy.empty()) n.host_key_policy = kHostKeyTofu;
     if (n.connect_timeout_sec == 0) n.connect_timeout_sec = kDefaultConnectTimeoutSec;
@@ -131,21 +114,18 @@ std::string Session::label() const {
 
 std::string Session::target() const {
     std::string h = trim(host);
-    std::string hp = join_host_port(h, port, default_port(transport));
-    if (transport == Transport::Ssh) {
-        std::string u = trim(username);
-        if (!u.empty() && !hp.empty()) return u + "@" + hp;
-    }
+    std::string hp = join_host_port(h, port, kSshPort);
+    std::string u = trim(username);
+    if (!u.empty() && !hp.empty()) return u + "@" + hp;
     return hp;
 }
 
 std::string Session::key() const {
     std::string h = lower(trim(host));
     if (h.empty()) return {};
-    int p = port == 0 ? default_port(transport) : port;
-    std::string u = transport == Transport::Ssh ? trim(username) : std::string{};
-    return std::string(to_string(transport)) + ":" + (u.empty() ? "" : u + "@") + h + ":" +
-           std::to_string(p);
+    int p = port == 0 ? kSshPort : port;
+    std::string u = trim(username);
+    return (u.empty() ? "" : u + "@") + h + ":" + std::to_string(p);
 }
 
 std::vector<FieldError> validate(const Session &in) {
@@ -159,23 +139,21 @@ std::vector<FieldError> validate(const Session &in) {
         add("host", "contains whitespace");
     if (s.port < 1 || s.port > 65535) add("port", "must be 1-65535");
 
-    if (s.transport == Transport::Ssh) {
-        if (s.auth_type == kAuthPublicKey) {
-            if (s.key_path.empty()) add("key_path", "required for public-key auth");
-        } else if (s.auth_type != kAuthAgent && s.auth_type != kAuthPassword) {
-            add("auth_type", "unknown auth type " + dq(s.auth_type));
-        }
-        // No vault to fall back on. A blank user would make ssh log in as the
-        // local account, which on network gear is a confusing failure.
-        if (s.username.empty()) add("username", "required");
-        if (s.host_key_policy != kHostKeyStrict && s.host_key_policy != kHostKeyTofu &&
-            s.host_key_policy != kHostKeyInsecure)
-            add("host_key_policy", "unknown policy " + dq(s.host_key_policy));
-        if (s.connect_timeout_sec < 1) add("connect_timeout_sec", "must be at least 1");
-        if (s.jump.in_use()) {
-            if (s.jump.port < 1 || s.jump.port > 65535) add("jump.port", "must be 1-65535");
-            if (s.jump.username.empty()) add("jump.username", "required");
-        }
+    if (s.auth_type == kAuthPublicKey) {
+        if (s.key_path.empty()) add("key_path", "required for public-key auth");
+    } else if (s.auth_type != kAuthAgent && s.auth_type != kAuthPassword) {
+        add("auth_type", "unknown auth type " + dq(s.auth_type));
+    }
+    // No vault to fall back on. A blank user would make ssh log in as the
+    // local account, which on network gear is a confusing failure.
+    if (s.username.empty()) add("username", "required");
+    if (s.host_key_policy != kHostKeyStrict && s.host_key_policy != kHostKeyTofu &&
+        s.host_key_policy != kHostKeyInsecure)
+        add("host_key_policy", "unknown policy " + dq(s.host_key_policy));
+    if (s.connect_timeout_sec < 1) add("connect_timeout_sec", "must be at least 1");
+    if (s.jump.in_use()) {
+        if (s.jump.port < 1 || s.jump.port > 65535) add("jump.port", "must be 1-65535");
+        if (s.jump.username.empty()) add("jump.username", "required");
     }
 
     if (s.font_size != 0 && (s.font_size < 6 || s.font_size > 72)) add("font_size", "must be 6-72");
@@ -339,8 +317,8 @@ struct Reader {
     }
 };
 
-// Returns nullopt for a session that is skipped (serial, unknown transport,
-// not a mapping). skipped_serial is bumped for serial.
+// Returns nullopt for a session that is skipped (serial or telnet, an
+// unknown transport, not a mapping). skipped_unsupported counts the first.
 std::optional<Session> read_session(const YAML::Node &m, const std::string &folder,
                                     std::size_t index, LoadResult &res) {
     std::string where = folder + "/#" + std::to_string(index + 1);
@@ -352,20 +330,18 @@ std::optional<Session> read_session(const YAML::Node &m, const std::string &fold
     std::string nm = trim(r.str(m, "name"));
     if (!nm.empty()) r.where = folder + "/" + nm;
 
-    std::string tr = r.str(m, "transport");
-    if (lower(trim(tr)) == "serial") {
-        ++res.skipped_serial;
+    const std::string tr = lower(trim(r.str(m, "transport")));
+    if (tr == "serial" || tr == "telnet") {
+        ++res.skipped_unsupported;
         return std::nullopt;
     }
-    auto transport = parse_transport(tr);
-    if (!transport) {
+    if (!tr.empty() && tr != "ssh") {
         res.warnings.push_back(r.where + ": unknown transport " + dq(tr) + ", skipped");
         return std::nullopt;
     }
 
     Session s;
     s.name = nm;
-    s.transport = *transport;
     s.host = r.str(m, "host");
     s.port = r.integer(m, "port");
     s.username = r.str(m, "username");
@@ -382,7 +358,6 @@ std::optional<Session> read_session(const YAML::Node &m, const std::string &fold
     s.host_key_policy = r.str(m, "host_key_policy");
     s.known_hosts = r.str(m, "known_hosts");
     s.connect_timeout_sec = r.integer(m, "connect_timeout_sec");
-    s.telnet_crlf = r.boolean(m, "telnet_crlf");
     s.term_type = r.str(m, "term_type");
     s.terminal_theme = r.str(m, "terminal_theme");
     s.font_size = r.integer(m, "font_size");
@@ -419,7 +394,7 @@ void read_folders(const YAML::Node &seq, LoadResult &res) {
             res.warnings.push_back("folder " + dq(name) + ": sessions is not a list, ignored");
             continue;
         }
-        const int serial_before = res.skipped_serial;
+        const int skipped_before = res.skipped_unsupported;
         for (std::size_t si = 0; si < ss.size(); ++si) {
             auto s = read_session(ss[si], name, si, res);
             if (!s) continue;
@@ -430,10 +405,11 @@ void read_folders(const YAML::Node &seq, LoadResult &res) {
             }
             dst.sessions.push_back(std::move(*s));
         }
-        // A folder that held only serial consoles would show up empty; drop it.
-        // A folder that was empty in the file stays: somebody made it.
+        // A folder that held only serial or telnet sessions would show up
+        // empty; drop it. A folder that was empty in the file stays: somebody
+        // made it.
         if (created && res.tree.folders[at].sessions.empty() &&
-            res.skipped_serial > serial_before)
+            res.skipped_unsupported > skipped_before)
             res.tree.folders.pop_back();
     }
 }
@@ -548,29 +524,25 @@ void emit_session(YAML::Emitter &out, const Session &in) {
 
     out << YAML::BeginMap;
     emit_str(out, "name", s.name);
-    out << YAML::Key << "transport" << YAML::Value << to_string(s.transport);
+    // Always ssh; written so the file stays PathfinderSSH's format.
+    out << YAML::Key << "transport" << YAML::Value << "ssh";
     str_if("host", s.host);
     int_if("port", s.port);
-
-    if (s.transport == Transport::Ssh) {
-        str_if("username", s.username);
-        str_if("auth_type", s.auth_type);
-        str_if("key_path", s.key_path);
-        if (s.jump.in_use()) {
-            out << YAML::Key << "jump" << YAML::Value << YAML::BeginMap;
-            emit_str(out, "host", s.jump.host);
-            int_if("port", s.jump.port);
-            str_if("username", s.jump.username);
-            str_if("key_path", s.jump.key_path);
-            out << YAML::EndMap;
-        }
-        if (s.legacy_algorithms) out << YAML::Key << "legacy_algorithms" << YAML::Value << true;
-        str_if("host_key_policy", s.host_key_policy);
-        str_if("known_hosts", s.known_hosts);
-        int_if("connect_timeout_sec", s.connect_timeout_sec);
-    } else if (s.telnet_crlf.has_value()) {
-        out << YAML::Key << "telnet_crlf" << YAML::Value << *s.telnet_crlf;
+    str_if("username", s.username);
+    str_if("auth_type", s.auth_type);
+    str_if("key_path", s.key_path);
+    if (s.jump.in_use()) {
+        out << YAML::Key << "jump" << YAML::Value << YAML::BeginMap;
+        emit_str(out, "host", s.jump.host);
+        int_if("port", s.jump.port);
+        str_if("username", s.jump.username);
+        str_if("key_path", s.jump.key_path);
+        out << YAML::EndMap;
     }
+    if (s.legacy_algorithms) out << YAML::Key << "legacy_algorithms" << YAML::Value << true;
+    str_if("host_key_policy", s.host_key_policy);
+    str_if("known_hosts", s.known_hosts);
+    int_if("connect_timeout_sec", s.connect_timeout_sec);
 
     str_if("term_type", s.term_type);
     str_if("terminal_theme", s.terminal_theme);
@@ -677,14 +649,14 @@ std::string seed_sessions_yaml(const std::string &username) {
     return "# tmssh sessions\n"
            "#\n"
            "# Edit this file directly; tmssh reloads it when you save. Folders are one\n"
-           "# level deep. A session needs a name and a host; transport defaults to ssh.\n"
+           "# level deep. A session needs a name and a host; everything else is\n"
+           "# optional. Sessions are ssh; serial and telnet entries are skipped.\n"
            "#\n"
-           "# ssh:     port, username, auth_type (agent | password | publickey),\n"
-           "#          key_path, host_key_policy (tofu | strict | insecure),\n"
-           "#          known_hosts, connect_timeout_sec, legacy_algorithms (true),\n"
-           "#          jump: {host, port, username, key_path}\n"
-           "# telnet:  port, telnet_crlf (false to send a bare CR)\n"
-           "# any:     term_type, terminal_theme, font_size, scrollback_lines\n"
+           "# connection:  port, username, auth_type (agent | password | publickey),\n"
+           "#              key_path, host_key_policy (tofu | strict | insecure),\n"
+           "#              known_hosts, connect_timeout_sec, legacy_algorithms (true),\n"
+           "#              jump: {host, port, username, key_path}\n"
+           "# terminal:    term_type, terminal_theme, font_size, scrollback_lines\n"
            "#\n"
            "# Changes made from tmssh itself (delete, import) rewrite this file\n"
            "# without these comments.\n"

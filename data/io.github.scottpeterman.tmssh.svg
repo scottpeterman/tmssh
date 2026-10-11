@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- tmssh application icon: a terminal prompt over a small session tree. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect x="8" y="12" width="112" height="104" rx="18" fill="#1f2430"/>
+  <rect x="8" y="12" width="112" height="104" rx="18" fill="none" stroke="#3b4252" stroke-width="2"/>
+  <rect x="8" y="12" width="112" height="22" rx="18" fill="#2e3440"/>
+  <rect x="8" y="26" width="112" height="8" fill="#2e3440"/>
+  <circle cx="24" cy="23" r="4" fill="#bf616a"/>
+  <circle cx="37" cy="23" r="4" fill="#ebcb8b"/>
+  <circle cx="50" cy="23" r="4" fill="#a3be8c"/>
+  <!-- session tree -->
+  <rect x="20" y="46" width="10" height="7" rx="1.5" fill="#88c0d0"/>
+  <path d="M25 53 V84 M25 66 H34 M25 84 H34" stroke="#88c0d0" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <rect x="36" y="62" width="8" height="8" rx="1.5" fill="#81a1c1"/>
+  <rect x="36" y="80" width="8" height="8" rx="1.5" fill="#81a1c1"/>
+  <!-- prompt -->
+  <path d="M58 56 L74 68 L58 80" stroke="#eceff4" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="80" y="76" width="26" height="7" rx="3" fill="#a3be8c"/>
+</svg>

@@ -3,11 +3,38 @@
 Tiny Managed SSH.
 
 A small GTK 4 session-manager terminal for Linux: a session tree, tabs, and
-ssh or telnet sessions on the [gtkpyte](https://github.com/scottpeterman/gtkpyte)
-widget. No vault, no serial.
+ssh sessions on the [gtkpyte](https://github.com/scottpeterman/gtkpyte)
+widget, plus local shells. Sessions live in one YAML file you edit by hand.
+No vault, no telnet, no serial: ssh is the system client, so your
+`~/.ssh/config`, agent and keys do the work.
 
-Status: session tree, tabs, ssh, themes. Telnet comes next; until then a
-telnet session opens a placeholder tab.
+## AppImage
+
+Each release has `tmssh-<version>-x86_64.AppImage`, which carries GTK 4 and
+its libraries; only the `ssh` client comes from the system.
+
+```
+chmod +x tmssh-0.1.0-x86_64.AppImage
+```
+
+```
+./tmssh-0.1.0-x86_64.AppImage
+```
+
+AppImages mount themselves with FUSE. Where that is missing (a fresh Crostini
+container, for one), either install it once or run the image without it:
+
+```
+sudo apt install -y libfuse2
+```
+
+```
+./tmssh-0.1.0-x86_64.AppImage --appimage-extract-and-run
+```
+
+An AppImage runs on systems whose glibc is at least as new as the one it was
+built on; the release notes say which. `scripts/appimage.sh` builds one from
+a checkout into `dist/`.
 
 ## Running
 
@@ -137,7 +164,8 @@ folders:
         terminal_theme: ice
 ```
 
-Folders are one level deep. Serial sessions are skipped on load. Keys tmssh
+Folders are one level deep. Serial and telnet sessions (from a PathfinderSSH
+file) are skipped on load and counted in the import summary. Keys tmssh
 does not model (`credential`, `anti_idle`, paste pacing, `vendor`, `notes`, ...)
 are ignored and not written back.
 
@@ -185,7 +213,8 @@ src/
 gtkpyte/                 the terminal widget, vendored (see gtkpyte/VENDORED.md)
 data/themes/             the bundled theme pack, compiled in as a GResource
 tests/                   doctest suites for the GTK-free modules
-scripts/build.sh
+scripts/build.sh         build, test, install
+scripts/appimage.sh      build the AppImage into dist/
 ```
 
 Everything except `app_window`, `theme_apply` and `main` is GTK-free and

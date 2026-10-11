@@ -16,10 +16,12 @@
 //
 // Folders are one level deep: a folder holds sessions, never folders.
 //
-// tmssh models only ssh and telnet. Serial sessions in a loaded file are
-// skipped and counted; keys tmssh does not model (credential, anti_idle,
+// tmssh's sessions are ssh only. Serial and telnet sessions in a loaded file
+// are skipped and counted; keys tmssh does not model (credential, anti_idle,
 // paste pacing, vendor/model/notes, ...) are ignored on load and are not
-// written back. tmssh owns its own file, so that loss is by design.
+// written back. tmssh owns its own file, so that loss is by design. Every
+// session is written with transport: ssh, so the file stays PathfinderSSH's
+// format.
 //
 // Errors from the editing operations come back as a std::string: empty means
 // it worked, anything else is the message to show.
@@ -32,11 +34,7 @@
 
 namespace tmssh {
 
-enum class Transport { Ssh, Telnet };
-
-const char *to_string(Transport t);
-std::optional<Transport> parse_transport(std::string_view s);
-int default_port(Transport t);
+inline constexpr int kSshPort = 22;
 
 // auth_type values. Agent leaves ssh to its defaults (agent, then keys, then
 // whatever the server offers).
@@ -69,13 +67,8 @@ inline bool operator!=(const JumpSpec &a, const JumpSpec &b) { return !(a == b);
 
 struct Session {
     std::string name;
-    Transport transport = Transport::Ssh;
-
-    // ssh and telnet
     std::string host;
     int port = 0;
-
-    // ssh
     std::string username;
     std::string auth_type;
     std::string key_path;
@@ -84,9 +77,6 @@ struct Session {
     std::string host_key_policy;
     std::string known_hosts;
     int connect_timeout_sec = 0;
-
-    // telnet: expand a lone CR to CR LF. Unset means the default, which is on.
-    std::optional<bool> telnet_crlf;
 
     // terminal. Zero font_size / scrollback_lines and an empty
     // terminal_theme mean "inherit the application setting".
@@ -105,13 +95,10 @@ struct Session {
     // user@host:port, with the port left off when it is the default.
     std::string target() const;
 
-    // Identity for import de-duplication: transport, ssh username, host,
-    // port. A session renamed in the tree is still the same login; two
+    // Identity for import de-duplication: username, host, port. A session renamed in the tree is still the same login; two
     // accounts on one device are two sessions. Empty when there is no host,
     // and an empty key matches nothing.
     std::string key() const;
-
-    bool crlf() const { return !telnet_crlf.has_value() || *telnet_crlf; }
 };
 
 bool operator==(const Session &a, const Session &b);
@@ -123,7 +110,7 @@ struct FieldError {
 };
 
 // Every problem, each tagged with its field, so a form can mark them all at
-// once. Only the fields the session's transport uses are checked.
+// once.
 std::vector<FieldError> validate(const Session &s);
 
 struct Folder {
@@ -163,8 +150,8 @@ struct LoadResult {
     Tree tree;
     // Set when the file could not be read or parsed; tree is then empty.
     std::string error;
-    // Serial sessions dropped on load.
-    int skipped_serial = 0;
+    // Serial and telnet sessions dropped on load: tmssh is ssh only.
+    int skipped_unsupported = 0;
     // Problems that did not stop the load: an unknown transport, a number
     // field holding text, a duplicate folder merged into the first.
     std::vector<std::string> warnings;
@@ -181,8 +168,8 @@ LoadResult parse_tree(std::string_view yaml);
 // that is what a first run looks like.
 LoadResult load_file(const std::string &path);
 
-// Renders a tree as it is written to disk: normalized, with only the fields
-// each session's transport uses.
+// Renders a tree as it is written to disk: normalized, with empty and zero
+// fields left out.
 std::string emit_tree(const Tree &tree);
 
 // Writes through a temporary file in the same directory, then renames it over

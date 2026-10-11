@@ -76,13 +76,6 @@ TEST_CASE("normalized fills defaults and trims") {
     CHECK(n.terminal_theme.empty());
 }
 
-TEST_CASE("telnet defaults to port 23") {
-    Session s;
-    s.transport = Transport::Telnet;
-    s.host = "cs1";
-    CHECK(s.normalized().port == 23);
-}
-
 TEST_CASE("jump port defaults only when a jump host is set") {
     Session s = ssh("a", "h");
     CHECK(s.normalized().jump.port == 0);
@@ -100,14 +93,10 @@ TEST_CASE("label and target") {
     s.name = "lab";
     CHECK(s.label() == "lab");
 
-    Session t;
-    t.transport = Transport::Telnet;
-    t.host = "cs1";
-    t.port = 2003;
-    t.username = "ignored";
-    CHECK(t.target() == "cs1:2003");
-    t.port = 23;
-    CHECK(t.target() == "cs1");
+    Session nouser;
+    nouser.host = "cs1";
+    nouser.port = 22;
+    CHECK(nouser.target() == "cs1");
 }
 
 TEST_CASE("an unnamed session takes its target as its name") {
@@ -117,32 +106,21 @@ TEST_CASE("an unnamed session takes its target as its name") {
     CHECK(s.normalized().name == "u@r1");
 }
 
-TEST_CASE("key is transport, ssh user, lowercased host and effective port") {
+TEST_CASE("key is user, lowercased host and effective port") {
     Session a = ssh("x", "R1.Lab");
     Session b = ssh("y", "r1.lab");
     b.port = 22;
-    CHECK(a.key() == "ssh:admin@r1.lab:22");
+    CHECK(a.key() == "admin@r1.lab:22");
     CHECK(a.key() == b.key());
 
     Session other_user = ssh("z", "r1.lab", "operator");
     CHECK(other_user.key() != a.key());
 
     Session no_user = ssh("n", "r1.lab", "");
-    CHECK(no_user.key() == "ssh:r1.lab:22");
-
-    Session t = a;
-    t.transport = Transport::Telnet;
-    CHECK(t.key() == "telnet:r1.lab:23"); // telnet has no user in the model
+    CHECK(no_user.key() == "r1.lab:22");
 
     Session none;
     CHECK(none.key().empty());
-}
-
-TEST_CASE("crlf defaults on") {
-    Session s;
-    CHECK(s.crlf());
-    s.telnet_crlf = false;
-    CHECK_FALSE(s.crlf());
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -198,14 +176,6 @@ TEST_CASE("jump host needs a username") {
     CHECK(validate(s).empty());
 }
 
-TEST_CASE("telnet skips the ssh rules") {
-    Session s;
-    s.transport = Transport::Telnet;
-    s.host = "cs1";
-    s.auth_type = "nonsense";
-    CHECK(validate(s).empty());
-}
-
 // ─────────────────────────────────────────────────────────────────────
 // Parsing
 // ─────────────────────────────────────────────────────────────────────
@@ -222,11 +192,10 @@ folders:
         username: admin
         auth_type: password
         terminal_theme: ice
-      - name: cs1-port3
-        transport: telnet
+      - name: oob-console
+        transport: ssh
         host: cs1
         port: 2003
-        telnet_crlf: false
   - folder_name: Empty
     sessions: []
 )");
@@ -238,25 +207,39 @@ folders:
     REQUIRE(lab.sessions.size() == 2);
 
     const auto &a = lab.sessions[0];
-    CHECK(a.transport == Transport::Ssh);
     CHECK(a.host == "172.16.2.5");
     CHECK(a.port == 22);
     CHECK(a.auth_type == kAuthPassword);
     CHECK(a.terminal_theme == "ice");
 
     const auto &t = lab.sessions[1];
-    CHECK(t.transport == Transport::Telnet);
     CHECK(t.port == 2003);
-    REQUIRE(t.telnet_crlf.has_value());
-    CHECK_FALSE(*t.telnet_crlf);
+    CHECK(t.target() == "cs1:2003");
 
     CHECK(r.tree.folders[1].sessions.empty());
 }
 
-TEST_CASE("missing transport means ssh") {
+TEST_CASE("a session with no transport is an ssh session") {
     auto r = parse_tree("folders:\n  - folder_name: A\n    sessions:\n      - name: x\n        host: h\n");
     REQUIRE(r.ok());
-    CHECK(r.tree.folders[0].sessions[0].transport == Transport::Ssh);
+    REQUIRE(r.tree.folders[0].sessions.size() == 1);
+    CHECK(r.tree.folders[0].sessions[0].port == 22);
+}
+
+TEST_CASE("telnet sessions are skipped and counted, like serial") {
+    auto r = parse_tree(R"(
+folders:
+  - folder_name: Lab
+    sessions:
+      - {name: cs1, transport: telnet, host: cs1, port: 2003, telnet_crlf: false}
+      - {name: r1, transport: ssh, host: r1}
+      - {name: usb0, transport: serial, serial_port: /dev/ttyUSB0}
+)");
+    REQUIRE(r.ok());
+    CHECK(r.warnings.empty());
+    CHECK(r.skipped_unsupported == 2);
+    REQUIRE(r.tree.folders[0].sessions.size() == 1);
+    CHECK(r.tree.folders[0].sessions[0].name == "r1");
 }
 
 TEST_CASE("serial sessions are skipped and counted") {
@@ -274,7 +257,7 @@ folders:
         host: r1
 )");
     REQUIRE(r.ok());
-    CHECK(r.skipped_serial == 1);
+    CHECK(r.skipped_unsupported == 1);
     CHECK(r.warnings.empty());
     REQUIRE(r.tree.folders[0].sessions.size() == 1);
     CHECK(r.tree.folders[0].sessions[0].name == "r1");
@@ -393,11 +376,8 @@ TEST_CASE("emit then parse round-trips every modelled field") {
     a.scrollback_lines = 20000;
 
     Session b;
-    b.name = "console";
-    b.transport = Transport::Telnet;
+    b.name = "minimal";
     b.host = "cs1";
-    b.port = 2003;
-    b.telnet_crlf = false;
 
     REQUIRE(t.add("Lab", a).empty());
     REQUIRE(t.add("Lab", b).empty());
@@ -413,31 +393,12 @@ TEST_CASE("emit then parse round-trips every modelled field") {
     CHECK(r.tree.folders[0].sessions[1] == b.normalized());
 }
 
-TEST_CASE("a telnet session writes no ssh fields") {
-    Tree t;
-    Session s;
-    s.name = "cs";
-    s.transport = Transport::Telnet;
-    s.host = "cs1";
-    s.username = "leftover";
-    s.key_path = "/leftover";
-    s.legacy_algorithms = true;
-    REQUIRE(t.add("A", s).empty());
-    std::string y = emit_tree(t);
-    CHECK(y.find("username") == std::string::npos);
-    CHECK(y.find("key_path") == std::string::npos);
-    CHECK(y.find("legacy_algorithms") == std::string::npos);
-    CHECK(y.find("host_key_policy") == std::string::npos);
-    CHECK(y.find("telnet_crlf") == std::string::npos); // unset stays unset
-}
-
-TEST_CASE("an ssh session writes no telnet field and no unused jump") {
+TEST_CASE("every session is written as ssh, with no unused jump") {
     Tree t;
     Session s = ssh("a", "h");
-    s.telnet_crlf = false;
     REQUIRE(t.add("A", s).empty());
     std::string y = emit_tree(t);
-    CHECK(y.find("telnet_crlf") == std::string::npos);
+    CHECK(y.find("transport: ssh") != std::string::npos);
     CHECK(y.find("jump") == std::string::npos);
 }
 
@@ -764,7 +725,7 @@ TEST_CASE("reads a file PathfinderSSH wrote") {
     auto r = parse_tree(kPathfinderFile);
     REQUIRE(r.ok());
     CHECK(r.warnings.empty());
-    CHECK(r.skipped_serial == 1);
+    CHECK(r.skipped_unsupported == 2); // the telnet and the serial session
 
     // The serial-only Console folder is dropped rather than shown empty.
     REQUIRE(r.tree.folders.size() == 2);
@@ -780,9 +741,7 @@ TEST_CASE("reads a file PathfinderSSH wrote") {
     CHECK(spine.terminal_theme == "ice");
     CHECK(validate(spine).empty());
 
-    const auto &cs = r.tree.folders[0].sessions[1];
-    CHECK(cs.transport == Transport::Telnet);
-    CHECK_FALSE(cs.crlf());
+    CHECK(r.tree.folders[0].sessions.size() == 1); // cs1-p3 was telnet
 
     const auto &edge = r.tree.folders[1].sessions[0];
     CHECK(edge.name == "true");
@@ -809,7 +768,6 @@ TEST_CASE("the seed file parses cleanly to Local/localhost as the user") {
     REQUIRE(r.tree.folders[0].sessions.size() == 1);
     const Session &s = r.tree.folders[0].sessions[0];
     CHECK(s.name == "localhost");
-    CHECK(s.transport == Transport::Ssh);
     CHECK(s.host == "localhost");
     CHECK(s.username == "speterman");
     CHECK(s.target() == "speterman@localhost");

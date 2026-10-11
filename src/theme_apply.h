@@ -21,6 +21,14 @@ const char *to_string(AppVariant v);
 // terminal theme.
 void set_app_variant(AppVariant v);
 
+// Call before GTK starts. Inside the AppImage, the bundling tool exports
+// GTK_THEME=Adwaita:<variant> so the host's GTK themes (built for another GTK)
+// are never loaded. GTK_THEME outranks every setting, so it would also lock the
+// window to that variant. This drops the variable and has set_app_variant pin
+// the theme to Adwaita instead, which keeps the protection and leaves dark and
+// light to tmssh. Outside an AppImage it does nothing.
+void release_appimage_theme_pin();
+
 // Puts a theme's colours on one terminal.
 void apply_terminal_theme(GtkpyteTerminal *terminal, const Theme &theme);
 
