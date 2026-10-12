@@ -1,72 +1,45 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build directories
+# --- build output -------------------------------------------------------------
+# scripts/build.sh: build/, build-release/; scripts/appimage.sh: build-appimage/
 build/
-Build/
 build-*/
 
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
+# --- AppImage ------------------------------------------------------------------
+# linuxdeploy and its GTK plugin, fetched by scripts/appimage.sh
+.appimage-tools/
+# packaged AppImages; these go on GitHub Releases, not in the tree
+dist/
+*.AppImage
+*.AppImage.zsync
+AppDir/
+squashfs-root/
 
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/
-
-# meson
+# --- meson ---------------------------------------------------------------------
+# subprojects fetched from the .wrap files; the wraps and packagefiles stay
 subprojects/*/
 !subprojects/packagefiles/
+subprojects/packagecache/
+meson-logs/
+meson-private/
+
+# --- compiler and tool output ---------------------------------------------------
+*.o
+*.a
+*.so
+*.so.*
+*.d
+*.gch
+*.pch
+compile_commands.json
+.cache/
+
+# --- editors and OS -------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# --- stray runtime files --------------------------------------------------------
+*.log
+*.tmp
+*.bak
