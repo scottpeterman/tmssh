@@ -8,9 +8,9 @@
 # glibc is the same as, or newer than, the one it was built on: build on the
 # oldest system you want to reach (Debian 12 reaches the most).
 #
-# Needs the build dependencies (scripts/build.sh --deps), curl, and network
-# access the first time: linuxdeploy and its GTK plugin are fetched into
-# .appimage-tools/ and reused after that.
+# Needs the build dependencies (scripts/build.sh --deps), curl, file (appimagetool
+# calls it), and network access the first time: linuxdeploy and its GTK plugin are
+# fetched into .appimage-tools/ and reused after that.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,7 +26,11 @@ die() {
 }
 
 [[ "$(uname -m)" == "x86_64" ]] || die "only x86_64 is set up here (uname -m: $(uname -m))"
-command -v curl >/dev/null || die "curl is needed to fetch linuxdeploy"
+missing=()
+for tool in curl file; do
+    command -v "$tool" >/dev/null || missing+=("$tool")
+done
+[[ ${#missing[@]} -eq 0 ]] || die "missing: ${missing[*]} -- sudo apt install -y ${missing[*]}"
 
 VERSION="$(sed -n "s/^  version : '\(.*\)',$/\1/p" "$ROOT/meson.build" | head -1)"
 [[ -n "$VERSION" ]] || die "could not read the version from meson.build"
@@ -87,7 +91,7 @@ echo "==> packing $OUT_NAME"
 mkdir -p "$DIST"
 (
     cd "$BUILD"
-    OUTPUT="$OUT_NAME" linuxdeploy-x86_64.AppImage --appdir "$APPDIR" --output appimage
+    LDAI_OUTPUT="$OUT_NAME" linuxdeploy-x86_64.AppImage --appdir "$APPDIR" --output appimage
     mv "$OUT_NAME" "$DIST/"
 )
 

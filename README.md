@@ -62,10 +62,57 @@ filter box to narrow the tree by name, host or username.
 | Ctrl+Shift+F | filter sessions |
 | Ctrl+Shift+Q | quit |
 | Ctrl+Shift+C / Ctrl+Shift+V | copy / paste (in the terminal) |
+| Ctrl+Shift+A | select all |
+| Ctrl+= / Ctrl+- / Ctrl+0 | zoom in / out / normal size (Cmd on macOS) |
+| Ctrl+scroll | zoom |
+| Ctrl+Shift+L | start or stop logging the current tab |
+
+Right-click in a terminal for Copy, Paste, Select All, zoom, logging,
+Reconnect and Close Tab. The right button always opens the menu; a
+full-screen program that asks for the mouse gets the left and middle
+buttons only.
+
+Zoom applies to every tab at once and is kept between runs (`font_zoom`
+in the settings). A session with its own `font_size` zooms from that size.
 
 When an ssh session ends, its tab stays open with the exit status, so an
 authentication or connection error stays readable. Ctrl+Shift+R runs it
 again.
+
+## Session logs
+
+**Log This Tab** in the menu (or Ctrl+Shift+L, or right-click → Log
+Session) writes the tab's output to a new file in `~/tmssh-logs/`, named
+for the session and the time: `edge1-01.fra1_20261012-014000.log`. A red dot
+on the tab shows it is logging; its tooltip gives the file. **Log New SSH
+Sessions** logs every ssh session from the moment it opens, and **Open Log
+Folder** opens the directory.
+
+Logs are plain text: colours and terminal control are stripped, and the
+line editing a terminal does in place (carriage return, backspace,
+erase-line) is applied first, so pager prompts such as `--More--` and
+command-line edits do not appear and a line reads as it did on screen.
+Full-screen programs such as vi or top do not reduce to lines and log
+messily.
+
+```
+# tmssh session log: edge1-01.fra1
+# target: admin@10.20.0.1
+# started 2026-10-12 01:40:00 -0600
+# tmssh: connecting 2026-10-12 01:40:00 -0600: ssh -l admin -- 10.20.0.1
+admin@edge1-01.fra1> show bgp summary | no-more
+...
+# tmssh: session ended 2026-10-12 02:15:12 -0600 (exit 0)
+# tmssh: log closed 2026-10-12 02:15:20 -0600
+```
+
+Reconnecting keeps writing to the same file, with a `connecting` line.
+Only output is logged; typed input appears through the device's echo, so
+passwords typed at a prompt that does not echo are never written. Files
+are created mode 0600 (and the directory 0700 when tmssh creates it),
+since a log holds whatever the device printed, configuration included. A
+file is never appended to: two logs started in the same second get `-2`,
+`-3`. `log_dir` in the settings moves them.
 
 ## Editing sessions
 
@@ -145,7 +192,8 @@ transparency.
 | File | What |
 |---|---|
 | `~/.config/tmssh/sessions.yaml` | sessions |
-| `~/.config/tmssh/settings.yaml` | window, theme, font, scrollback, window size |
+| `~/.config/tmssh/settings.yaml` | window, theme, font, zoom, scrollback, window size, logging |
+| `~/tmssh-logs/` | session logs (`log_dir` in the settings) |
 | `~/.config/tmssh/themes/` | your themes |
 
 `$XDG_CONFIG_HOME` replaces `~/.config` when it is set.
@@ -204,6 +252,7 @@ application menu; on a Chromebook it appears under Linux apps.
 ```
 src/
   sessions.{h,cpp}       session model, YAML load/save, tree edits, import
+  session_log.{h,cpp}    session logs: terminal output to plain text, log files
   ssh_command.{h,cpp}    a session as an ssh command line
   settings.{h,cpp}       settings.yaml
   themes.{h,cpp}         theme files, colour parsing, the theme set

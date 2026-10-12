@@ -1,6 +1,6 @@
 # Vendored gtkpyte
 
-The terminal widget and its emulation core, copied unmodified from
+The terminal widget and its emulation core, copied from
 https://github.com/scottpeterman/gtkpyte
 
 - Source commit: `9f275bfa7d074321a4747ce3df94e0e59609d189`
@@ -11,6 +11,14 @@ https://github.com/scottpeterman/gtkpyte
 | `src/*.{h,cpp}` | `src/` except `main.cpp` and `envcheck.cpp` |
 | `pyte/include/`, `pyte/src/` | `pyte/include/`, `pyte/src/` |
 | `meson.build` | written for tmssh; builds the same two libraries as gtkpyte's |
+
+## Local change, to go upstream
+
+`src/ptysession.{h,cpp}` carry one addition not yet in gtkpyte:
+`PtySession::set_output_handler()`, a callback given every chunk read from
+the child before it is fed to the terminal. tmssh uses it for session logs.
+Apply the same change to gtkpyte, then refresh from it as below; the
+refresh replaces these two files with gtkpyte's.
 
 `pyte/` is itself vendored in gtkpyte from anytermqt, so the chain is
 anytermqt -> gtkpyte -> tmssh. Fixes go upstream first and are copied down;

@@ -9,6 +9,9 @@
 //   window_width: 1100
 //   window_height: 700
 //   sidebar_width: 260
+//   font_zoom: 0              # points added to every terminal font (Ctrl+= / Ctrl+-)
+//   log_dir: ~/tmssh-logs     # where session logs go
+//   auto_log: false           # log every ssh session from the moment it opens
 //
 // Every key is optional; a missing or unusable value takes its default, so a
 // hand-edited file can never stop the application starting.
@@ -27,7 +30,16 @@ struct Settings {
     int window_width = 1100;
     int window_height = 700;
     int sidebar_width = 260;
+    int font_zoom = 0;
+    std::string log_dir = "~/tmssh-logs";
+    bool auto_log = false;
 };
+
+// Bounds on font_zoom, and on the size a zoomed font may reach.
+inline constexpr int kFontZoomMin = -20;
+inline constexpr int kFontZoomMax = 60;
+inline constexpr int kFontSizeMin = 6;
+inline constexpr int kFontSizeMax = 72;
 
 struct SettingsLoad {
     Settings settings;

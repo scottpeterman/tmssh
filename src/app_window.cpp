@@ -2,6 +2,7 @@
 #include "app_window.h"
 
 #include <pwd.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -9,6 +10,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -16,6 +18,7 @@
 
 #include "gtkpyte-terminal.h"
 #include "ptysession.h"
+#include "session_log.h"
 
 namespace fs = std::filesystem;
 
@@ -98,6 +101,10 @@ struct AppWindow::Tab {
     std::string program;            // local program; empty means the shell
     std::vector<std::string> args;
     bool close_on_success = false; // an editor tab goes away when the editor exits cleanly
+    GtkWidget *log_dot = nullptr;  // shown in the tab while it is logging
+    // Declared before pty so it is destroyed after it: the log's footer is
+    // the last thing written.
+    std::unique_ptr<SessionLog> log;
     std::unique_ptr<gtkpyte::PtySession> pty;
     bool running = false;
 };
@@ -121,7 +128,26 @@ AppWindow::Tab *AppWindow::add_tab(const std::string &title, const std::string &
     g_object_set_data_full(G_OBJECT(scroller), kKeyTab, tab,
                            [](gpointer p) { delete static_cast<Tab *>(p); });
 
+    // Right-click menu and Ctrl+wheel zoom, in the capture phase on the page
+    // so they run before the terminal's own gestures: a right-click that
+    // opens the menu never reaches selection or mouse reporting.
+    GtkGesture *menu_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu_click), GDK_BUTTON_SECONDARY);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(menu_click), GTK_PHASE_CAPTURE);
+    g_signal_connect(menu_click, "pressed", G_CALLBACK(on_terminal_pressed), tab);
+    gtk_widget_add_controller(scroller, GTK_EVENT_CONTROLLER(menu_click));
+
+    GtkEventController *zoom =
+        gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    gtk_event_controller_set_propagation_phase(zoom, GTK_PHASE_CAPTURE);
+    g_signal_connect(zoom, "scroll", G_CALLBACK(on_zoom_scroll), tab);
+    gtk_widget_add_controller(scroller, zoom);
+
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    tab->log_dot = gtk_label_new("\u25CF"); // ●, in the theme's error colour
+    gtk_widget_add_css_class(tab->log_dot, "error");
+    gtk_widget_set_visible(tab->log_dot, FALSE);
+    gtk_box_append(GTK_BOX(box), tab->log_dot);
     tab->label = gtk_label_new(nullptr);
     gtk_label_set_ellipsize(GTK_LABEL(tab->label), PANGO_ELLIPSIZE_END);
     // An ellipsizing label's minimum width is one "...", and the notebook
@@ -156,14 +182,31 @@ AppWindow::Tab *AppWindow::current_tab() {
     return page ? static_cast<Tab *>(g_object_get_data(G_OBJECT(page), kKeyTab)) : nullptr;
 }
 
-void AppWindow::apply_appearance(Tab *tab) {
-    // Font: the application font, at the session's size if it sets one.
+void AppWindow::apply_font(Tab *tab) {
+    // The application font, at the session's size if it sets one, plus the zoom.
     const std::string font = options_.font.value_or(settings_.font);
     PangoFontDescription *desc = pango_font_description_from_string(font.c_str());
-    if (tab->session && tab->session->font_size > 0)
-        pango_font_description_set_size(desc, tab->session->font_size * PANGO_SCALE);
+    bool absolute = pango_font_description_get_size_is_absolute(desc);
+    int size = pango_font_description_get_size(desc) / PANGO_SCALE;
+    if (size <= 0) {
+        size = 12;
+        absolute = false;
+    }
+    if (tab->session && tab->session->font_size > 0) {
+        size = tab->session->font_size;
+        absolute = false;
+    }
+    size = std::clamp(size + settings_.font_zoom, kFontSizeMin, kFontSizeMax);
+    if (absolute)
+        pango_font_description_set_absolute_size(desc, size * PANGO_SCALE);
+    else
+        pango_font_description_set_size(desc, size * PANGO_SCALE);
     gtkpyte_terminal_set_font_desc(tab->terminal, desc);
     pango_font_description_free(desc);
+}
+
+void AppWindow::apply_appearance(Tab *tab) {
+    apply_font(tab);
 
     int scrollback = settings_.scrollback_lines;
     if (tab->session && tab->session->scrollback_lines > 0)
@@ -177,13 +220,176 @@ void AppWindow::apply_appearance(Tab *tab) {
     if (const Theme *t = themes_.resolve(theme)) apply_terminal_theme(tab->terminal, *t);
 }
 
-void AppWindow::reapply_default_theme() {
+void AppWindow::for_each_tab(const std::function<void(Tab *)> &fn) {
     const int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(notebook_));
     for (int i = 0; i < n; ++i) {
         GtkWidget *page = gtk_notebook_get_nth_page(GTK_NOTEBOOK(notebook_), i);
         auto *tab = static_cast<Tab *>(g_object_get_data(G_OBJECT(page), kKeyTab));
-        if (tab) apply_appearance(tab);
+        if (tab) fn(tab);
     }
+}
+
+void AppWindow::reapply_default_theme() {
+    for_each_tab([this](Tab *tab) { apply_appearance(tab); });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Font zoom
+// ─────────────────────────────────────────────────────────────────────
+
+void AppWindow::zoom_by(int steps) {
+    // Bound the zoom by what the application font can reach, so steps past
+    // the limit are not stored and then have to be undone one by one.
+    const std::string font = options_.font.value_or(settings_.font);
+    PangoFontDescription *desc = pango_font_description_from_string(font.c_str());
+    int base = pango_font_description_get_size(desc) / PANGO_SCALE;
+    pango_font_description_free(desc);
+    if (base <= 0) base = 12;
+    const int lo = std::max(kFontZoomMin, kFontSizeMin - base);
+    const int hi = std::min(kFontZoomMax, kFontSizeMax - base);
+    const int zoom = std::clamp(settings_.font_zoom + steps, lo, hi);
+    if (zoom == settings_.font_zoom) return;
+    settings_.font_zoom = zoom;
+    for_each_tab([this](Tab *tab) { apply_font(tab); });
+    save_settings_soon();
+}
+
+void AppWindow::zoom_reset() {
+    if (settings_.font_zoom == 0) return;
+    settings_.font_zoom = 0;
+    for_each_tab([this](Tab *tab) { apply_font(tab); });
+    save_settings_soon();
+}
+
+gboolean AppWindow::on_zoom_scroll(GtkEventControllerScroll *c, double, double dy, gpointer data) {
+    auto *tab = static_cast<Tab *>(data);
+    AppWindow *self = tab->owner;
+    const GdkModifierType state =
+        gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c));
+    if (!(state & (GDK_CONTROL_MASK | GDK_META_MASK))) {
+        self->zoom_accum_ = 0.0;
+        return FALSE; // plain wheel: the terminal's scrollback
+    }
+    // A wheel notch is one step; a touchpad, one step per 25 pixels of travel.
+    const bool wheel = gtk_event_controller_scroll_get_unit(c) == GDK_SCROLL_UNIT_WHEEL;
+    self->zoom_accum_ += wheel ? dy : dy / 25.0;
+    const int steps = static_cast<int>(self->zoom_accum_);
+    if (steps != 0) {
+        self->zoom_accum_ -= steps;
+        self->zoom_by(-steps); // wheel up (negative dy) zooms in
+    }
+    return TRUE;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Session logs
+// ─────────────────────────────────────────────────────────────────────
+
+bool AppWindow::start_log(Tab *tab) {
+    if (tab->log) return true;
+    auto log = std::make_unique<SessionLog>();
+    std::string target;
+    if (tab->session)
+        target = tab->session->target();
+    else
+        target = tab->program.empty() ? user_shell() : tab->program;
+    if (!log->create(expand_log_dir(settings_.log_dir), tab->title, target, std::time(nullptr))) {
+        message("Could not start the session log", log->error());
+        return false;
+    }
+    tab->log = std::move(log);
+    show_log_state(tab);
+    return true;
+}
+
+void AppWindow::stop_log(Tab *tab, const std::string &why) {
+    if (!tab->log) return;
+    tab->log->close(why + " " + log_timestamp(std::time(nullptr)));
+    tab->log.reset();
+    show_log_state(tab);
+}
+
+void AppWindow::show_log_state(Tab *tab) {
+    const bool on = tab->log != nullptr;
+    gtk_widget_set_visible(tab->log_dot, on);
+    const std::string tip = on ? "Logging to " + tab->log->path() : std::string();
+    gtk_widget_set_tooltip_text(tab->log_dot, on ? tip.c_str() : nullptr);
+    if (tab == current_tab()) sync_log_action(tab);
+}
+
+void AppWindow::sync_log_action(Tab *tab) {
+    GAction *a = g_action_map_lookup_action(G_ACTION_MAP(window_), "log");
+    if (a == nullptr) return;
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(a), tab != nullptr);
+    g_simple_action_set_state(G_SIMPLE_ACTION(a), g_variant_new_boolean(tab && tab->log));
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Terminal context menu
+// ─────────────────────────────────────────────────────────────────────
+
+void AppWindow::on_terminal_pressed(GtkGestureClick *g, int, double x, double y, gpointer data) {
+    auto *tab = static_cast<Tab *>(data);
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_widget_grab_focus(GTK_WIDGET(tab->terminal));
+    tab->owner->show_terminal_menu(tab, x, y);
+}
+
+void AppWindow::show_terminal_menu(Tab *tab, double x, double y) {
+    GAction *copy = g_action_map_lookup_action(G_ACTION_MAP(window_), "copy");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(copy), gtkpyte_terminal_has_selection(tab->terminal));
+
+    // The terminal owns these keys itself, so they are shown here as labels
+    // rather than registered as accelerators that could fire a second time.
+    auto shown_key = [](GMenu *m, const char *label, const char *action, const char *keys) {
+        GMenuItem *item = g_menu_item_new(label, action);
+        g_menu_item_set_attribute(item, "accel", "s", keys);
+        g_menu_append_item(m, item);
+        g_object_unref(item);
+    };
+
+    GMenu *menu = g_menu_new();
+    GMenu *edit = g_menu_new();
+    shown_key(edit, "Copy", "win.copy", "<Control><Shift>c");
+    shown_key(edit, "Paste", "win.paste", "<Control><Shift>v");
+    shown_key(edit, "Select All", "win.select-all", "<Control><Shift>a");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(edit));
+    g_object_unref(edit);
+
+    GMenu *zoom = g_menu_new();
+    g_menu_append(zoom, "Zoom In", "win.zoom-in");
+    g_menu_append(zoom, "Zoom Out", "win.zoom-out");
+    g_menu_append(zoom, "Normal Size", "win.zoom-reset");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(zoom));
+    g_object_unref(zoom);
+
+    GMenu *session = g_menu_new();
+    g_menu_append(session, "Log Session", "win.log");
+    g_menu_append(session, "Reconnect", "win.reconnect");
+    g_menu_append(session, "Close Tab", "win.close-tab");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(session));
+    g_object_unref(session);
+
+    // Parented to the notebook, which outlives every tab: Close Tab from this
+    // menu removes the page while the popover is still closing.
+    GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    g_object_unref(menu);
+    gtk_widget_set_parent(popover, notebook_);
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    double nx = x, ny = y;
+    gtk_widget_translate_coordinates(tab->page, notebook_, x, y, &nx, &ny);
+    const GdkRectangle at = {static_cast<int>(nx), static_cast<int>(ny), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &at);
+    g_signal_connect(popover, "closed", G_CALLBACK(+[](GtkPopover *p, gpointer) {
+                         g_idle_add(
+                             [](gpointer w) -> gboolean {
+                                 gtk_widget_unparent(GTK_WIDGET(w));
+                                 return G_SOURCE_REMOVE;
+                             },
+                             p);
+                     }),
+                     nullptr);
+    gtk_popover_popup(GTK_POPOVER(popover));
 }
 
 void AppWindow::start_tab(Tab *tab) {
@@ -195,21 +401,35 @@ void AppWindow::start_tab(Tab *tab) {
     std::vector<std::string> args;
     std::vector<std::string> env;
 
+    std::string shown; // what the log records as being run
     if (!tab->session) {
         program = tab->program.empty() ? user_shell() : tab->program;
         args = tab->args;
+        shown = program;
     } else {
         Command c = ssh_command(*tab->session, algorithms());
         program = c.program;
         args = c.args;
         env = c.env;
-        const std::string banner = "\x1b[2m" + c.display() + "\x1b[0m\r\n";
+        shown = c.display();
+        const std::string banner = "\x1b[2m" + shown + "\x1b[0m\r\n";
         gtkpyte_terminal_feed(tab->terminal, banner.data(), banner.size());
     }
+    if (tab->log) tab->log->note("connecting " + log_timestamp(std::time(nullptr)) + ": " + shown);
 
     tab->pty = std::make_unique<gtkpyte::PtySession>(tab->terminal);
+    tab->pty->set_output_handler([tab](const char *data, std::size_t len) {
+        if (tab->log && !tab->log->write(data, len)) {
+            const std::string err = tab->log->error();
+            tab->owner->stop_log(tab, "log stopped on error");
+            tab->owner->message("Session log stopped", err);
+        }
+    });
     tab->pty->set_exit_handler([tab](int status) {
         tab->running = false;
+        if (tab->log)
+            tab->log->note("session ended " + log_timestamp(std::time(nullptr)) + " (" +
+                           exit_text(status) + ")");
         if (tab->close_on_success && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
             // Deferred: this runs inside the session's own callback, and
             // removing the page deletes the session.
@@ -281,6 +501,7 @@ void AppWindow::open_session(const std::string &folder, const std::string &name)
     Tab *tab = add_tab(s.label(), s.target());
     tab->session = s;
     apply_appearance(tab);
+    if (settings_.auto_log) start_log(tab);
     start_tab(tab);
     focus_later(GTK_WIDGET(tab->terminal));
 }
@@ -329,7 +550,16 @@ AppWindow::AppWindow(GtkApplication *app, ThemeSet themes, LaunchOptions options
 }
 
 AppWindow::~AppWindow() {
+    // This runs from the window's "destroy". The notebook is held (see
+    // build_ui), so it is still alive here and its pages are still in it:
+    // the handlers holding `this` go first, then the pages, which closes any
+    // session logs with their footer.
+    if (notebook_) {
+        g_signal_handlers_disconnect_by_data(notebook_, this);
+        g_object_unref(notebook_);
+    }
     if (reload_timer_ != 0) g_source_remove(reload_timer_);
+    if (save_timer_ != 0) g_source_remove(save_timer_);
     if (monitor_) {
         g_signal_handlers_disconnect_by_data(monitor_, this);
         g_file_monitor_cancel(monitor_);
@@ -375,11 +605,13 @@ void AppWindow::build_ui() {
     gtk_widget_set_vexpand(notebook_, TRUE);
     g_signal_connect(notebook_, "switch-page", G_CALLBACK(on_switch_page), this);
     g_signal_connect(notebook_, "page-removed",
-                     G_CALLBACK(+[](GtkNotebook *nb, GtkWidget *, guint, gpointer win) {
+                     G_CALLBACK(+[](GtkNotebook *nb, GtkWidget *, guint, gpointer self) {
+                         auto *me = static_cast<AppWindow *>(self);
                          if (gtk_notebook_get_n_pages(nb) == 0)
-                             gtk_window_set_title(GTK_WINDOW(win), "tmssh");
+                             gtk_window_set_title(GTK_WINDOW(me->window_), "tmssh");
+                         me->sync_log_action(me->current_tab());
                      }),
-                     window_);
+                     this);
     // Shown while there are no tabs.
     GtkWidget *empty = gtk_label_new("Double-click a session to connect,\n"
                                      "or Ctrl+Shift+T for a local terminal.");
@@ -388,6 +620,10 @@ void AppWindow::build_ui() {
     GtkWidget *stack = gtk_stack_new();
     gtk_stack_add_named(GTK_STACK(stack), empty, "empty");
     gtk_stack_add_named(GTK_STACK(stack), notebook_, "tabs");
+    // Held until ~AppWindow: GTK's teardown order between the window's
+    // "destroy" and the notebook's finalisation is not fixed, and either
+    // order without this hold runs a handler on something already gone.
+    g_object_ref(notebook_);
     auto update_stack = +[](GtkNotebook *nb, GtkWidget *, guint, gpointer stk) {
         // Tearing down the window removes every page after the stack has
         // started dropping its own children, and GtkStack's dispose runs
@@ -465,6 +701,20 @@ GMenuModel *AppWindow::build_menu() {
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(tabs));
     g_object_unref(tabs);
 
+    GMenu *term = g_menu_new();
+    g_menu_append(term, "Zoom In", "win.zoom-in");
+    g_menu_append(term, "Zoom Out", "win.zoom-out");
+    g_menu_append(term, "Normal Size", "win.zoom-reset");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(term));
+    g_object_unref(term);
+
+    GMenu *logs = g_menu_new();
+    g_menu_append(logs, "Log This Tab", "win.log");
+    g_menu_append(logs, "Log New SSH Sessions", "win.auto-log");
+    g_menu_append(logs, "Open Log Folder", "win.open-log-folder");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(logs));
+    g_object_unref(logs);
+
     GMenu *import = g_menu_new();
     g_menu_append(import, "Import PathfinderSSH Sessions", "win.import-pathfinder");
     g_menu_append(import, "Import Session File…", "win.import-file");
@@ -521,6 +771,13 @@ void AppWindow::install_actions() {
         {"next-tab", act_next_tab, nullptr, nullptr, nullptr, {}},
         {"prev-tab", act_prev_tab, nullptr, nullptr, nullptr, {}},
         {"find", act_find, nullptr, nullptr, nullptr, {}},
+        {"copy", act_copy, nullptr, nullptr, nullptr, {}},
+        {"paste", act_paste, nullptr, nullptr, nullptr, {}},
+        {"select-all", act_select_all, nullptr, nullptr, nullptr, {}},
+        {"zoom-in", act_zoom_in, nullptr, nullptr, nullptr, {}},
+        {"zoom-out", act_zoom_out, nullptr, nullptr, nullptr, {}},
+        {"zoom-reset", act_zoom_reset, nullptr, nullptr, nullptr, {}},
+        {"open-log-folder", act_open_log_folder, nullptr, nullptr, nullptr, {}},
         {"import-pathfinder", act_import_pathfinder, nullptr, nullptr, nullptr, {}},
         {"import-file", act_import_file, nullptr, nullptr, nullptr, {}},
         {"edit-sessions", act_edit_sessions, nullptr, nullptr, nullptr, {}},
@@ -542,28 +799,65 @@ void AppWindow::install_actions() {
     g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(t));
     g_object_unref(t);
 
+    // Toggles: activating flips the state through change-state.
+    GSimpleAction *log = g_simple_action_new_stateful("log", nullptr, g_variant_new_boolean(FALSE));
+    g_signal_connect(log, "change-state", G_CALLBACK(act_log), this);
+    g_simple_action_set_enabled(log, FALSE); // until there is a tab
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(log));
+    g_object_unref(log);
+
+    GSimpleAction *auto_log =
+        g_simple_action_new_stateful("auto-log", nullptr, g_variant_new_boolean(settings_.auto_log));
+    g_signal_connect(auto_log, "change-state", G_CALLBACK(act_auto_log), this);
+    g_action_map_add_action(G_ACTION_MAP(window_), G_ACTION(auto_log));
+    g_object_unref(auto_log);
+
     // Menu accelerators, and the same keys in the capture phase so they reach
     // the window before the terminal turns them into bytes for the remote end.
+    //
+    // Zoom takes plain Ctrl (and Cmd, which GTK on macOS reports as Meta), as
+    // every terminal does. Ctrl+Shift+minus -- ^_, readline's undo -- is left
+    // alone: only the unshifted minus zooms out.
     struct Accel {
         const char *action;
-        const char *keys;
+        const char *keys[6]; // null-terminated
     };
     const Accel accels[] = {
-        {"win.local", "<Control><Shift>t"},      {"win.close-tab", "<Control><Shift>w"},
-        {"win.reconnect", "<Control><Shift>r"},  {"win.next-tab", "<Control>Page_Down"},
-        {"win.prev-tab", "<Control>Page_Up"},    {"win.find", "<Control><Shift>f"},
-        {"win.quit", "<Control><Shift>q"},
+        {"win.local", {"<Control><Shift>t"}},
+        {"win.close-tab", {"<Control><Shift>w"}},
+        {"win.reconnect", {"<Control><Shift>r"}},
+        {"win.next-tab", {"<Control>Page_Down"}},
+        {"win.prev-tab", {"<Control>Page_Up"}},
+        {"win.find", {"<Control><Shift>f"}},
+        {"win.quit", {"<Control><Shift>q"}},
+        {"win.log", {"<Control><Shift>l"}},
+        {"win.zoom-in",
+         {"<Control>equal", "<Control>plus", "<Control>KP_Add", "<Meta>equal", "<Meta>plus"}},
+        {"win.zoom-out", {"<Control>minus", "<Control>KP_Subtract", "<Meta>minus"}},
+        {"win.zoom-reset", {"<Control>0", "<Control>KP_0", "<Meta>0"}},
     };
     GtkEventController *shortcuts = gtk_shortcut_controller_new();
     gtk_event_controller_set_propagation_phase(shortcuts, GTK_PHASE_CAPTURE);
     gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(shortcuts), GTK_SHORTCUT_SCOPE_GLOBAL);
     for (const Accel &a : accels) {
-        const char *keys[] = {a.keys, nullptr};
-        gtk_application_set_accels_for_action(app_, a.action, keys);
-        gtk_shortcut_controller_add_shortcut(
-            GTK_SHORTCUT_CONTROLLER(shortcuts),
-            gtk_shortcut_new(gtk_shortcut_trigger_parse_string(a.keys),
-                             gtk_named_action_new(a.action)));
+        // Every key works; the menus show one. On macOS that is the Cmd one
+        // where there is one, elsewhere the first.
+        const char *shown = a.keys[0];
+#ifdef __APPLE__
+        for (const char *const *k = a.keys; *k != nullptr; ++k)
+            if (g_str_has_prefix(*k, "<Meta>")) {
+                shown = *k;
+                break;
+            }
+#endif
+        const char *menu_keys[] = {shown, nullptr};
+        gtk_application_set_accels_for_action(app_, a.action, menu_keys);
+        for (const char *const *k = a.keys; *k != nullptr; ++k) {
+            gtk_shortcut_controller_add_shortcut(
+                GTK_SHORTCUT_CONTROLLER(shortcuts),
+                gtk_shortcut_new(gtk_shortcut_trigger_parse_string(*k),
+                                 gtk_named_action_new(a.action)));
+        }
     }
     gtk_widget_add_controller(window_, shortcuts);
 }
@@ -797,6 +1091,9 @@ void AppWindow::on_switch_page(GtkNotebook *, GtkWidget *page, guint, gpointer d
     auto *tab = static_cast<Tab *>(g_object_get_data(G_OBJECT(page), kKeyTab));
     const std::string title = tab ? "tmssh — " + tab->title : "tmssh";
     gtk_window_set_title(GTK_WINDOW(self->window_), title.c_str());
+    // switch-page runs before the notebook changes page, so the page passed
+    // in is the one to follow, not current_tab().
+    self->sync_log_action(tab);
     if (tab) focus_later(GTK_WIDGET(tab->terminal));
 }
 
@@ -812,6 +1109,10 @@ gboolean AppWindow::on_close_request(GtkWindow *window, gpointer data) {
         if (h > 0) self->settings_.window_height = h;
     }
     self->settings_.sidebar_width = gtk_paned_get_position(GTK_PANED(self->paned_));
+    if (self->save_timer_ != 0) {
+        g_source_remove(self->save_timer_);
+        self->save_timer_ = 0;
+    }
     self->save_settings_now();
     return FALSE; // let it close
 }
@@ -988,6 +1289,19 @@ void AppWindow::act_edit_sessions(GSimpleAction *, GVariant *, gpointer self) {
 void AppWindow::save_settings_now() {
     if (auto err = save_settings(settings_path_, settings_); !err.empty())
         std::cerr << "tmssh: " << err << "\n";
+}
+
+void AppWindow::save_settings_soon() {
+    if (save_timer_ != 0) g_source_remove(save_timer_);
+    save_timer_ = g_timeout_add(
+        500,
+        [](gpointer p) -> gboolean {
+            auto *me = static_cast<AppWindow *>(p);
+            me->save_timer_ = 0;
+            me->save_settings_now();
+            return G_SOURCE_REMOVE;
+        },
+        this);
 }
 
 void AppWindow::confirm(const std::string &text, const std::string &detail,
@@ -1172,6 +1486,77 @@ void AppWindow::act_prev_tab(GSimpleAction *, GVariant *, gpointer data) {
 
 void AppWindow::act_find(GSimpleAction *, GVariant *, gpointer data) {
     gtk_widget_grab_focus(static_cast<AppWindow *>(data)->filter_);
+}
+
+void AppWindow::act_copy(GSimpleAction *, GVariant *, gpointer data) {
+    if (Tab *tab = static_cast<AppWindow *>(data)->current_tab())
+        gtkpyte_terminal_copy_clipboard(tab->terminal);
+}
+
+void AppWindow::act_paste(GSimpleAction *, GVariant *, gpointer data) {
+    if (Tab *tab = static_cast<AppWindow *>(data)->current_tab()) {
+        gtkpyte_terminal_paste_clipboard(tab->terminal);
+        focus_later(GTK_WIDGET(tab->terminal));
+    }
+}
+
+void AppWindow::act_select_all(GSimpleAction *, GVariant *, gpointer data) {
+    if (Tab *tab = static_cast<AppWindow *>(data)->current_tab())
+        gtkpyte_terminal_select_all(tab->terminal);
+}
+
+void AppWindow::act_zoom_in(GSimpleAction *, GVariant *, gpointer data) {
+    static_cast<AppWindow *>(data)->zoom_by(1);
+}
+
+void AppWindow::act_zoom_out(GSimpleAction *, GVariant *, gpointer data) {
+    static_cast<AppWindow *>(data)->zoom_by(-1);
+}
+
+void AppWindow::act_zoom_reset(GSimpleAction *, GVariant *, gpointer data) {
+    static_cast<AppWindow *>(data)->zoom_reset();
+}
+
+void AppWindow::act_log(GSimpleAction *, GVariant *value, gpointer data) {
+    auto *self = static_cast<AppWindow *>(data);
+    Tab *tab = self->current_tab();
+    if (tab == nullptr) return;
+    if (g_variant_get_boolean(value))
+        self->start_log(tab);
+    else
+        self->stop_log(tab, "log stopped");
+    self->sync_log_action(tab); // the state is what happened, not what was asked
+}
+
+void AppWindow::act_auto_log(GSimpleAction *action, GVariant *value, gpointer data) {
+    auto *self = static_cast<AppWindow *>(data);
+    g_simple_action_set_state(action, value);
+    self->settings_.auto_log = g_variant_get_boolean(value);
+    self->save_settings_now();
+}
+
+void AppWindow::act_open_log_folder(GSimpleAction *, GVariant *, gpointer data) {
+    auto *self = static_cast<AppWindow *>(data);
+    const std::string dir = expand_log_dir(self->settings_.log_dir);
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec)) {
+        fs::create_directories(dir, ec);
+        if (!ec) ::chmod(dir.c_str(), 0700);
+    }
+    GFile *file = g_file_new_for_path(dir.c_str());
+    char *uri = g_file_get_uri(file);
+    g_object_unref(file);
+    GError *error = nullptr;
+    GdkAppLaunchContext *ctx =
+        gdk_display_get_app_launch_context(gtk_widget_get_display(self->window_));
+    const gboolean ok = g_app_info_launch_default_for_uri(uri, G_APP_LAUNCH_CONTEXT(ctx), &error);
+    g_object_unref(ctx);
+    g_free(uri);
+    if (!ok) {
+        // No file manager (a bare Crostini container has none): say where.
+        self->message("Session logs are in " + dir, error ? error->message : "");
+        g_clear_error(&error);
+    }
 }
 
 void AppWindow::act_import_pathfinder(GSimpleAction *, GVariant *, gpointer data) {

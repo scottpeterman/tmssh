@@ -22,6 +22,7 @@ namespace gtkpyte {
 class PtySession {
 public:
     using ExitHandler = std::function<void(int wait_status)>;
+    using OutputHandler = std::function<void(const char *data, std::size_t len)>;
 
     explicit PtySession(GtkpyteTerminal *terminal);
     ~PtySession();
@@ -35,6 +36,11 @@ public:
 
     // Called once, after the child has gone and its output is drained.
     void set_exit_handler(ExitHandler handler) { on_exit_ = std::move(handler); }
+
+    // Called with every chunk read from the child, just before it is fed to
+    // the terminal: the raw byte stream, for session logging. It must not
+    // destroy this session.
+    void set_output_handler(OutputHandler handler) { on_output_ = std::move(handler); }
 
     const std::string &error() const { return pty_.error(); }
     long pid() const { return pty_.pid(); }
@@ -73,6 +79,7 @@ private:
     gulong resized_handler_ = 0;
     bool finished_ = false;
     ExitHandler on_exit_;
+    OutputHandler on_output_;
 };
 
 }  // namespace gtkpyte

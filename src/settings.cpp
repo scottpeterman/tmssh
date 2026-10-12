@@ -133,6 +133,15 @@ SettingsLoad parse_settings(const std::string &yaml) {
     num("window_width", s.window_width, 200, 20000);
     num("window_height", s.window_height, 150, 20000);
     num("sidebar_width", s.sidebar_width, 0, 5000);
+    num("font_zoom", s.font_zoom, kFontZoomMin, kFontZoomMax);
+    str("log_dir", s.log_dir);
+    if (YAML::Node v = root["auto_log"]; v && !v.IsNull()) {
+        bool b = s.auto_log;
+        if (v.IsScalar() && YAML::convert<bool>::decode(v, b))
+            s.auto_log = b;
+        else
+            out.warnings.push_back("auto_log: must be true or false, ignored");
+    }
     return out;
 }
 
@@ -155,6 +164,9 @@ std::string emit_settings(const Settings &s) {
     out << YAML::Key << "window_width" << YAML::Value << s.window_width;
     out << YAML::Key << "window_height" << YAML::Value << s.window_height;
     out << YAML::Key << "sidebar_width" << YAML::Value << s.sidebar_width;
+    out << YAML::Key << "font_zoom" << YAML::Value << s.font_zoom;
+    out << YAML::Key << "log_dir" << YAML::Value << YAML::DoubleQuoted << s.log_dir;
+    out << YAML::Key << "auto_log" << YAML::Value << s.auto_log;
     out << YAML::EndMap;
     return std::string(out.c_str()) + "\n";
 }

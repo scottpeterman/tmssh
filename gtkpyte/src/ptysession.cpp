@@ -69,6 +69,9 @@ gboolean PtySession::on_readable(gint, GIOCondition, gpointer data) {
     while (total < kReadBudget) {
         const long n = self->pty_.read(buf, sizeof buf);
         if (n > 0) {
+            if (self->on_output_) {
+                self->on_output_(buf, static_cast<std::size_t>(n));
+            }
             gtkpyte_terminal_feed(self->terminal_, buf, static_cast<gsize>(n));
             total += static_cast<unsigned long>(n);
             continue;

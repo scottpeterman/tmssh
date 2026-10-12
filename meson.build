@@ -21,6 +21,7 @@ subdir('gtkpyte')
 # Session model and theme data: GTK-free, so the tests need no display.
 core_lib = static_library('tmssh_core',
   'src/sessions.cpp',
+  'src/session_log.cpp',
   'src/settings.cpp',
   'src/ssh_command.cpp',
   'src/themes.cpp',
@@ -64,7 +65,9 @@ if get_option('tests')
   doctest_dep = subproject('doctest').get_variable('doctest_dep')
   tmssh_tests = executable('tmssh_tests',
     'tests/main.cpp',
+    'tests/test_session_log.cpp',
     'tests/test_sessions.cpp',
+    'tests/test_settings.cpp',
     'tests/test_ssh_command.cpp',
     'tests/test_themes.cpp',
     dependencies : [core_dep, doctest_dep],

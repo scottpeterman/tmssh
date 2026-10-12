@@ -73,7 +73,21 @@ private:
     void start_tab(Tab *tab);
     void close_tab(Tab *tab);
     void apply_appearance(Tab *tab);
+    void apply_font(Tab *tab);
     void reapply_default_theme();
+    void show_terminal_menu(Tab *tab, double x, double y);
+
+    // --- font zoom: one step is a point, applied to every tab and kept
+    void zoom_by(int steps);
+    void zoom_reset();
+    void for_each_tab(const std::function<void(Tab *)> &fn);
+
+    // --- session logs
+    bool start_log(Tab *tab);
+    void stop_log(Tab *tab, const std::string &why);
+    void show_log_state(Tab *tab);
+    // The "log" toggle follows the tab on show; null for none.
+    void sync_log_action(Tab *tab);
 
     // --- persistence
     void save_sessions();
@@ -83,6 +97,7 @@ private:
     void reload_sessions();
     void show_banner(const std::string &text); // empty hides it
     void save_settings_now();
+    void save_settings_soon(); // coalesces a burst of zoom steps into one write
     void offer_first_run_import();
     void import_from(const std::string &path);
     void confirm(const std::string &text, const std::string &detail, const std::string &ok_label,
@@ -101,6 +116,8 @@ private:
     static void on_filter_changed(GtkSearchEntry *entry, gpointer self);
     static void on_switch_page(GtkNotebook *, GtkWidget *page, guint, gpointer self);
     static gboolean on_close_request(GtkWindow *, gpointer self);
+    static void on_terminal_pressed(GtkGestureClick *g, int n, double x, double y, gpointer tab);
+    static gboolean on_zoom_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer tab);
 
     static void act_local(GSimpleAction *, GVariant *, gpointer self);
     static void act_connect(GSimpleAction *, GVariant *, gpointer self);
@@ -110,6 +127,15 @@ private:
     static void act_next_tab(GSimpleAction *, GVariant *, gpointer self);
     static void act_prev_tab(GSimpleAction *, GVariant *, gpointer self);
     static void act_find(GSimpleAction *, GVariant *, gpointer self);
+    static void act_copy(GSimpleAction *, GVariant *, gpointer self);
+    static void act_paste(GSimpleAction *, GVariant *, gpointer self);
+    static void act_select_all(GSimpleAction *, GVariant *, gpointer self);
+    static void act_zoom_in(GSimpleAction *, GVariant *, gpointer self);
+    static void act_zoom_out(GSimpleAction *, GVariant *, gpointer self);
+    static void act_zoom_reset(GSimpleAction *, GVariant *, gpointer self);
+    static void act_log(GSimpleAction *, GVariant *, gpointer self);
+    static void act_auto_log(GSimpleAction *, GVariant *, gpointer self);
+    static void act_open_log_folder(GSimpleAction *, GVariant *, gpointer self);
     static void act_import_pathfinder(GSimpleAction *, GVariant *, gpointer self);
     static void act_import_file(GSimpleAction *, GVariant *, gpointer self);
     static void act_edit_sessions(GSimpleAction *, GVariant *, gpointer self);
@@ -136,6 +162,8 @@ private:
     GtkWidget *banner_ = nullptr; // sidebar message: a session file that will not parse
     GFileMonitor *monitor_ = nullptr;
     guint reload_timer_ = 0;
+    guint save_timer_ = 0;
+    double zoom_accum_ = 0.0; // Ctrl+scroll travel not yet a whole step
     // What tmssh last wrote or loaded, so its own saves are not reloaded.
     std::string last_text_;
     GtkWidget *list_view_ = nullptr;
