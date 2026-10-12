@@ -8,6 +8,8 @@ widget, plus local shells. Sessions live in one YAML file you edit by hand.
 No vault, no telnet, no serial: ssh is the system client, so your
 `~/.ssh/config`, agent and keys do the work.
 
+![tmssh running trippy across a lab network](docs/screenshots/trippy.png)
+
 ## AppImage
 
 Each release has `tmssh-<version>-x86_64.AppImage`, which carries GTK 4 and
@@ -73,6 +75,8 @@ Reconnect and Close Tab. The right button always opens the menu; a
 full-screen program that asks for the mouse gets the left and middle
 buttons only.
 
+![The terminal context menu, on a tab that is logging](docs/screenshots/context-menu.png)
+
 Zoom applies to every tab at once and is kept between runs (`font_zoom`
 in the settings). A session with its own `font_size` zooms from that size.
 
@@ -84,7 +88,7 @@ again.
 
 **Log This Tab** in the menu (or Ctrl+Shift+L, or right-click → Log
 Session) writes the tab's output to a new file in `~/tmssh-logs/`, named
-for the session and the time: `edge1-01.fra1_20261012-014000.log`. A red dot
+for the session and the time: `border1.dc1_20261012-030447.log`. A red dot
 on the tab shows it is logging; its tooltip gives the file. **Log New SSH
 Sessions** logs every ssh session from the moment it opens, and **Open Log
 Folder** opens the directory.
@@ -97,14 +101,22 @@ Full-screen programs such as vi or top do not reduce to lines and log
 messily.
 
 ```
-# tmssh session log: edge1-01.fra1
-# target: admin@10.20.0.1
-# started 2026-10-12 01:40:00 -0600
-# tmssh: connecting 2026-10-12 01:40:00 -0600: ssh -l admin -- 10.20.0.1
-admin@edge1-01.fra1> show bgp summary | no-more
-...
-# tmssh: session ended 2026-10-12 02:15:12 -0600 (exit 0)
-# tmssh: log closed 2026-10-12 02:15:20 -0600
+# tmssh session log: border1.dc1
+# target: root@10.99.2.2
+# started 2026-10-12 03:04:47 -0600
+# tmssh: connecting 2026-10-12 03:04:48 -0600: TERM=xterm-256color ssh -p 22 -l root -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -- 10.99.2.2
+root@border1-dc1:~# ip -br addr
+lo               UNKNOWN        127.0.0.1/8
+l2b@if3          UP             10.99.2.2/30
+l3a@if2          UP             10.99.3.1/30
+root@border1-dc1:~# ip route get 10.99.6.2
+10.99.6.2 via 10.99.3.2 dev l3a src 10.99.3.1 uid 0
+    cache
+root@border1-dc1:~# exit
+logout
+Connection to 10.99.2.2 closed.
+# tmssh: session ended 2026-10-12 03:04:53 -0600 (exit 0)
+# tmssh: log closed 2026-10-12 03:04:55 -0600
 ```
 
 Reconnecting keeps writing to the same file, with a `connecting` line.
