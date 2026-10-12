@@ -14,11 +14,11 @@ Each release has `tmssh-<version>-x86_64.AppImage`, which carries GTK 4 and
 its libraries; only the `ssh` client comes from the system.
 
 ```
-chmod +x tmssh-0.1.0-x86_64.AppImage
+chmod +x tmssh-0.2.0-x86_64.AppImage
 ```
 
 ```
-./tmssh-0.1.0-x86_64.AppImage
+./tmssh-0.2.0-x86_64.AppImage
 ```
 
 AppImages mount themselves with FUSE. Where that is missing (a fresh Crostini
@@ -29,7 +29,7 @@ sudo apt install -y libfuse2
 ```
 
 ```
-./tmssh-0.1.0-x86_64.AppImage --appimage-extract-and-run
+./tmssh-0.2.0-x86_64.AppImage --appimage-extract-and-run
 ```
 
 An AppImage runs on systems whose glibc is at least as new as the one it was
@@ -44,6 +44,7 @@ tmssh --theme gruvbox-dark --app light
 tmssh --font "JetBrains Mono 12"
 tmssh --sessions ~/lab/sessions.yaml
 tmssh --list-themes
+tmssh --version
 ```
 
 `--theme`, `--app` and `--font` apply to that run only. Choices made from the

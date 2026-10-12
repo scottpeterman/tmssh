@@ -1,5 +1,5 @@
 project('tmssh', ['c', 'cpp'],
-  version : '0.1.0',
+  version : '0.2.0',
   license : 'GPL-3.0-or-later',
   meson_version : '>= 1.0.0',
   default_options : [
@@ -57,7 +57,8 @@ executable('tmssh',
   'src/theme_apply.cpp',
   theme_resources,
   dependencies : [core_dep, gtkpyte_dep],
-  cpp_args : gtk_floor_args,
+  # The one place the version lives is project() above.
+  cpp_args : gtk_floor_args + ['-DTMSSH_VERSION="' + meson.project_version() + '"'],
   install : true,
 )
 

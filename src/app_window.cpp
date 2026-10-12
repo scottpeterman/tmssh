@@ -1599,7 +1599,7 @@ void AppWindow::act_about(GSimpleAction *, GVariant *, gpointer data) {
     const char *authors[] = {"Scott Peterman", nullptr};
     gtk_show_about_dialog(GTK_WINDOW(self->window_), "program-name", "tmssh", "comments",
                           "Tiny Managed SSH: a session manager and ssh terminal on gtkpyte.",
-                          "version", "0.1.0", "website", "https://github.com/scottpeterman/tmssh",
+                          "version", TMSSH_VERSION, "website", "https://github.com/scottpeterman/tmssh",
                           "license-type", GTK_LICENSE_GPL_3_0, "authors", authors, "logo-icon-name",
                           "utilities-terminal", nullptr);
 }

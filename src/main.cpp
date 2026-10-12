@@ -5,6 +5,7 @@
 //   tmssh --font "JetBrains Mono 12"
 //   tmssh --sessions ~/lab/sessions.yaml
 //   tmssh --list-themes
+//   tmssh --version
 //
 // --theme, --app and --font apply to this run; choices made from the menu
 // are saved to ~/.config/tmssh/settings.yaml.
@@ -35,7 +36,7 @@ void on_activate(GtkApplication *app, gpointer) {
 
 void usage(std::ostream &out) {
     out << "usage: tmssh [--theme NAME] [--app dark|light] [--font \"Family Size\"]\n"
-           "             [--sessions FILE] [--settings FILE] [--list-themes]\n";
+           "             [--sessions FILE] [--settings FILE] [--list-themes] [--version]\n";
 }
 
 void list_themes() {
@@ -83,6 +84,9 @@ int main(int argc, char *argv[]) {
             g_options.sessions_path = value;
         } else if (take("--settings", argc, argv, i, value)) {
             g_options.settings_path = value;
+        } else if (std::strcmp(argv[i], "--version") == 0) {
+            std::cout << "tmssh " << TMSSH_VERSION << "\n";
+            return 0;
         } else if (std::strcmp(argv[i], "--list-themes") == 0) {
             want_list = true;
         } else if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
